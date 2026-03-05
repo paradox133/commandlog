@@ -1,0 +1,807 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CommandLog — Agent Audit Trail</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/babel-standalone@7/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #030712;
+      --bg2: #0f172a;
+      --bg3: #1e293b;
+      --border: #1e293b;
+      --text: #e2e8f0;
+      --muted: #64748b;
+      --green: #22c55e;
+      --red: #ef4444;
+      --cyan: #06b6d4;
+      --blue: #3b82f6;
+      --purple: #a855f7;
+      --indigo: #6366f1;
+      --orange: #f97316;
+      --yellow: #eab308;
+    }
+    html, body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; min-height: 100vh; }
+    a { color: inherit; text-decoration: none; }
+    button { cursor: pointer; font-family: inherit; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+
+    /* NAV */
+    nav { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 0 24px; display: flex; align-items: center; gap: 32px; height: 56px; position: sticky; top: 0; z-index: 100; }
+    nav .logo { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 16px; color: var(--green); letter-spacing: -0.5px; display: flex; align-items: center; gap: 8px; }
+    nav .logo span { color: var(--muted); }
+    .nav-link { color: var(--muted); font-size: 14px; font-weight: 500; padding: 4px 0; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; cursor: pointer; }
+    .nav-link:hover { color: var(--text); }
+    .nav-link.active { color: var(--text); border-color: var(--green); }
+    .nav-spacer { flex: 1; }
+    .nav-pulse { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
+    .pulse-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+    /* LAYOUT */
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .page-title { font-size: 20px; font-weight: 700; margin-bottom: 6px; }
+    .page-sub { color: var(--muted); font-size: 14px; margin-bottom: 24px; }
+
+    /* CARDS */
+    .card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 20px; }
+    .card-sm { padding: 16px; }
+
+    /* STATS ROW */
+    .stats-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+    .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
+    .stat-value { font-family: 'JetBrains Mono', monospace; font-size: 28px; font-weight: 700; line-height: 1; }
+    .stat-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+
+    /* FILTERS */
+    .filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+    .filter-input { background: var(--bg2); border: 1px solid var(--border); border-radius: 6px; color: var(--text); padding: 7px 12px; font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.15s; }
+    .filter-input:focus { border-color: var(--green); }
+    .filter-input::placeholder { color: var(--muted); }
+    select.filter-input option { background: var(--bg3); }
+    .btn { display: inline-flex; align-items: center; gap: 6px; padding: 7px 14px; border-radius: 6px; font-size: 13px; font-weight: 500; border: none; transition: all 0.15s; }
+    .btn-ghost { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+    .btn-ghost:hover { border-color: var(--green); color: var(--green); }
+    .btn-primary { background: var(--green); color: #000; }
+    .btn-primary:hover { opacity: 0.9; }
+    .btn-danger { background: var(--red); color: #fff; }
+    .refresh-btn { margin-left: auto; }
+
+    /* TABLE */
+    .cmd-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .cmd-table th { text-align: left; padding: 10px 12px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); font-weight: 600; white-space: nowrap; }
+    .cmd-table td { padding: 10px 12px; border-bottom: 1px solid #0f172a; vertical-align: middle; }
+    .cmd-table tr:last-child td { border-bottom: none; }
+    .cmd-table tr:hover td { background: rgba(255,255,255,0.02); }
+
+    /* BADGES */
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; font-family: 'JetBrains Mono', monospace; white-space: nowrap; }
+    .badge-ssh { background: rgba(6,182,212,0.15); color: var(--cyan); border: 1px solid rgba(6,182,212,0.3); }
+    .badge-api_call { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
+    .badge-deploy { background: rgba(168,85,247,0.15); color: var(--purple); border: 1px solid rgba(168,85,247,0.3); }
+    .badge-docker { background: rgba(99,102,241,0.15); color: var(--indigo); border: 1px solid rgba(99,102,241,0.3); }
+    .badge-git { background: rgba(249,115,22,0.15); color: var(--orange); border: 1px solid rgba(249,115,22,0.3); }
+    .badge-file_edit { background: rgba(234,179,8,0.15); color: var(--yellow); border: 1px solid rgba(234,179,8,0.3); }
+    .badge-config_change { background: rgba(100,116,139,0.15); color: #94a3b8; border: 1px solid rgba(100,116,139,0.3); }
+    .badge-agent { padding: 3px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+    .badge-rex { background: rgba(34,197,94,0.15); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+    .badge-quinn { background: rgba(168,85,247,0.15); color: var(--purple); border: 1px solid rgba(168,85,247,0.3); }
+    .badge-dick { background: rgba(59,130,246,0.15); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
+    .badge-sentry { background: rgba(239,68,68,0.15); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
+
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+    .status-ok { background: var(--green); }
+    .status-fail { background: var(--red); }
+    .status-badge { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; }
+    .status-badge.ok { color: var(--green); }
+    .status-badge.fail { color: var(--red); }
+
+    .cmd-text { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #86efac; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+    .target-text { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+    .ts { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); white-space: nowrap; }
+    .dur { font-family: 'JetBrains Mono', monospace; font-size: 12px; color: var(--muted); }
+
+    .ticket-link { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--yellow); }
+
+    .pagination { display: flex; align-items: center; gap: 12px; margin-top: 16px; font-size: 13px; color: var(--muted); }
+    .pagination button { background: var(--bg2); border: 1px solid var(--border); color: var(--text); padding: 5px 12px; border-radius: 6px; font-size: 13px; }
+    .pagination button:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+    .pagination button:disabled { opacity: 0.4; cursor: default; }
+
+    /* MODAL */
+    .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 200; display: flex; align-items: center; justify-content: center; padding: 24px; }
+    .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 24px; width: 100%; max-width: 700px; max-height: 85vh; overflow-y: auto; }
+    .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; }
+    .modal-close { background: none; border: none; color: var(--muted); font-size: 18px; padding: 4px 8px; }
+    .modal-close:hover { color: var(--text); }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px; }
+    .detail-field label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; display: block; margin-bottom: 4px; }
+    .detail-field .val { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--text); word-break: break-all; }
+    .detail-full { margin-bottom: 16px; }
+    .code-block { background: #000; border: 1px solid var(--border); border-radius: 6px; padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px; color: #86efac; white-space: pre-wrap; word-break: break-all; max-height: 200px; overflow-y: auto; line-height: 1.6; }
+    .code-block.result { color: var(--text); }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 16px 0; }
+
+    /* REPLAY */
+    .replay-container { max-width: 900px; }
+    .replay-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; flex-wrap: wrap; }
+    .replay-controls { display: flex; align-items: center; gap: 8px; }
+    .replay-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text); padding: 8px 14px; border-radius: 6px; font-size: 14px; }
+    .replay-btn:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+    .replay-btn.active { background: var(--green); color: #000; border-color: var(--green); }
+    .replay-btn:disabled { opacity: 0.4; cursor: default; }
+    .replay-progress { font-family: 'JetBrains Mono', monospace; font-size: 13px; color: var(--muted); }
+
+    .scrubber-wrap { margin-bottom: 24px; }
+    .scrubber { width: 100%; height: 4px; -webkit-appearance: none; appearance: none; background: var(--bg3); border-radius: 2px; outline: none; cursor: pointer; }
+    .scrubber::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--green); cursor: pointer; }
+
+    .replay-step { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+    .replay-step-header { background: var(--bg3); padding: 12px 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .step-num { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: var(--muted); background: var(--bg); padding: 2px 7px; border-radius: 4px; }
+    .replay-step-body { padding: 16px; }
+    .replay-step-timeline { display: flex; gap: 4px; margin-bottom: 12px; }
+    .tl-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; border: 2px solid var(--border); cursor: pointer; }
+    .tl-dot.done { background: var(--green); border-color: var(--green); }
+    .tl-dot.current { background: var(--blue); border-color: var(--blue); box-shadow: 0 0 0 3px rgba(59,130,246,0.3); }
+    .tl-dot.pending { background: transparent; }
+
+    /* ANALYTICS */
+    .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+    .analytics-grid.full { grid-template-columns: 1fr; }
+    .chart-wrap { position: relative; height: 260px; }
+    .chart-wrap-tall { position: relative; height: 320px; }
+    .chart-title { font-size: 13px; font-weight: 600; margin-bottom: 14px; color: var(--text); }
+    .common-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .common-table th { text-align: left; padding: 8px 10px; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
+    .common-table td { padding: 8px 10px; border-bottom: 1px solid #0a1525; }
+    .common-table tr:last-child td { border-bottom: none; }
+
+    /* LOADING / EMPTY */
+    .loading { text-align: center; padding: 48px; color: var(--muted); font-size: 14px; }
+    .empty { text-align: center; padding: 48px; color: var(--muted); }
+    .empty-icon { font-size: 40px; margin-bottom: 12px; }
+    .empty-text { font-size: 14px; }
+    .error-msg { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: var(--red); padding: 12px 16px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; }
+
+    @media (max-width: 768px) {
+      .analytics-grid { grid-template-columns: 1fr; }
+      .detail-grid { grid-template-columns: 1fr; }
+      .cmd-text { max-width: 200px; }
+    }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const API = '/api';
+
+// ─── UTILS ────────────────────────────────────────────────────────────────────
+
+function fmtDur(ms) {
+  if (!ms) return '—';
+  if (ms < 1000) return `${ms}ms`;
+  return `${(ms/1000).toFixed(1)}s`;
+}
+
+function fmtTs(ts) {
+  if (!ts) return '—';
+  const d = new Date(ts.replace(' ', 'T'));
+  return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+    ' ' + d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function typeBadge(type) {
+  return <span className={`badge badge-${type}`}>{type}</span>;
+}
+
+function agentBadge(agent) {
+  const cls = ['rex','quinn','dick','sentry'].includes(agent) ? `badge-${agent}` : 'badge-rex';
+  return <span className={`badge badge-agent ${cls}`}>{agent}</span>;
+}
+
+function statusBadge(success) {
+  return success
+    ? <span className="status-badge ok"><span className="status-dot status-ok" /> OK</span>
+    : <span className="status-badge fail"><span className="status-dot status-fail" /> FAIL</span>;
+}
+
+async function apiFetch(path) {
+  const r = await fetch(API + path);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+
+// ─── ROUTER ───────────────────────────────────────────────────────────────────
+
+function useHash() {
+  const [hash, setHash] = useState(window.location.hash || '#/');
+  useEffect(() => {
+    const h = () => setHash(window.location.hash || '#/');
+    window.addEventListener('hashchange', h);
+    return () => window.removeEventListener('hashchange', h);
+  }, []);
+  return hash;
+}
+
+// ─── DETAIL MODAL ─────────────────────────────────────────────────────────────
+
+function DetailModal({ cmd, onClose }) {
+  if (!cmd) return null;
+  return (
+    <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
+      <div className="modal">
+        <div className="modal-title">
+          <span>Command #{cmd.id}</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="detail-grid">
+          <div className="detail-field"><label>Agent</label><div className="val">{agentBadge(cmd.agent)}</div></div>
+          <div className="detail-field"><label>Type</label><div className="val">{typeBadge(cmd.commandType)}</div></div>
+          <div className="detail-field"><label>Status</label><div className="val">{statusBadge(cmd.success)}</div></div>
+          <div className="detail-field"><label>Exit Code</label><div className="val">{cmd.exitCode}</div></div>
+          <div className="detail-field"><label>Duration</label><div className="val">{fmtDur(cmd.duration)}</div></div>
+          <div className="detail-field"><label>Timestamp</label><div className="val">{fmtTs(cmd.createdAt)}</div></div>
+          {cmd.target && <div className="detail-field"><label>Target</label><div className="val">{cmd.target}</div></div>}
+          {cmd.ticketId && <div className="detail-field"><label>Ticket</label><div className="val ticket-link">{cmd.ticketId}</div></div>}
+          {cmd.sessionId && <div className="detail-field"><label>Session</label><div className="val mono" style={{fontSize:'11px'}}>{cmd.sessionId}</div></div>}
+        </div>
+        <div className="detail-full">
+          <label style={{fontSize:'11px',color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:'8px'}}>Command</label>
+          <div className="code-block">$ {cmd.command}</div>
+        </div>
+        {cmd.result && (
+          <div className="detail-full">
+            <label style={{fontSize:'11px',color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:'8px'}}>Output</label>
+            <div className="code-block result">{cmd.result}</div>
+          </div>
+        )}
+        {cmd.metadata && cmd.metadata !== '{}' && (
+          <div className="detail-full">
+            <label style={{fontSize:'11px',color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.06em',display:'block',marginBottom:'8px'}}>Metadata</label>
+            <div className="code-block result">{JSON.stringify(JSON.parse(cmd.metadata), null, 2)}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── COMMAND FEED ─────────────────────────────────────────────────────────────
+
+function CommandFeed() {
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [offset, setOffset] = useState(0);
+  const limit = 50;
+
+  const [agent, setAgent] = useState('');
+  const [type, setType] = useState('');
+  const [ticket, setTicket] = useState('');
+  const [q, setQ] = useState('');
+  const [from, setFrom] = useState('');
+  const [to, setTo] = useState('');
+
+  const load = useCallback(async (off = 0) => {
+    setLoading(true); setError(null);
+    try {
+      const params = new URLSearchParams({ limit, offset: off });
+      if (agent) params.set('agent', agent);
+      if (type) params.set('type', type);
+      if (ticket) params.set('ticket', ticket);
+      if (q) params.set('q', q);
+      if (from) params.set('from', from);
+      if (to) params.set('to', to);
+      const data = await apiFetch(`/commands?${params}`);
+      setRows(data.rows); setTotal(data.total); setOffset(off);
+    } catch(e) { setError(e.message); }
+    finally { setLoading(false); }
+  }, [agent, type, ticket, q, from, to]);
+
+  useEffect(() => { load(0); }, []);
+
+  // Auto-refresh every 10s
+  useEffect(() => {
+    const t = setInterval(() => load(offset), 10000);
+    return () => clearInterval(t);
+  }, [load, offset]);
+
+  const handleSearch = e => { e.preventDefault(); load(0); };
+
+  return (
+    <div className="container">
+      <div className="page-title">⌨ Command Feed</div>
+      <div className="page-sub">Real-time audit trail of all agent commands · auto-refreshes every 10s</div>
+
+      <form onSubmit={handleSearch} className="filters">
+        <input className="filter-input" placeholder="🔍 Search commands, output, target..." value={q}
+          onChange={e => setQ(e.target.value)} style={{minWidth:'260px'}} />
+        <select className="filter-input" value={agent} onChange={e => setAgent(e.target.value)}>
+          <option value="">All Agents</option>
+          <option value="rex">rex</option>
+          <option value="quinn">quinn</option>
+          <option value="dick">dick</option>
+          <option value="sentry">sentry</option>
+        </select>
+        <select className="filter-input" value={type} onChange={e => setType(e.target.value)}>
+          <option value="">All Types</option>
+          <option value="ssh">ssh</option>
+          <option value="api_call">api_call</option>
+          <option value="file_edit">file_edit</option>
+          <option value="deploy">deploy</option>
+          <option value="docker">docker</option>
+          <option value="git">git</option>
+          <option value="config_change">config_change</option>
+        </select>
+        <input className="filter-input" placeholder="Ticket ID" value={ticket}
+          onChange={e => setTicket(e.target.value)} style={{width:'120px'}} />
+        <input className="filter-input" type="date" value={from}
+          onChange={e => setFrom(e.target.value)} title="From date" />
+        <input className="filter-input" type="date" value={to}
+          onChange={e => setTo(e.target.value)} title="To date" />
+        <button type="submit" className="btn btn-primary">Apply</button>
+        <button type="button" className="btn btn-ghost" onClick={() => {
+          setAgent(''); setType(''); setTicket(''); setQ(''); setFrom(''); setTo('');
+          setTimeout(() => load(0), 50);
+        }}>Clear</button>
+        <button type="button" className="btn btn-ghost refresh-btn" onClick={() => load(offset)}>↻ Refresh</button>
+      </form>
+
+      {error && <div className="error-msg">⚠ {error}</div>}
+
+      <div className="card" style={{padding:0}}>
+        {loading && rows.length === 0 ? (
+          <div className="loading">Loading commands…</div>
+        ) : rows.length === 0 ? (
+          <div className="empty"><div className="empty-icon">📭</div><div className="empty-text">No commands found</div></div>
+        ) : (
+          <div style={{overflowX:'auto'}}>
+            <table className="cmd-table">
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Timestamp</th>
+                  <th>Agent</th>
+                  <th>Type</th>
+                  <th>Command</th>
+                  <th>Target</th>
+                  <th>Ticket</th>
+                  <th>Status</th>
+                  <th>Duration</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(cmd => (
+                  <tr key={cmd.id} onClick={() => setSelected(cmd)} style={{cursor:'pointer'}}>
+                    <td><span className="mono" style={{fontSize:'11px',color:'var(--muted)'}}>{cmd.id}</span></td>
+                    <td><span className="ts">{fmtTs(cmd.createdAt)}</span></td>
+                    <td>{agentBadge(cmd.agent)}</td>
+                    <td>{typeBadge(cmd.commandType)}</td>
+                    <td><span className="cmd-text">$ {cmd.command}</span></td>
+                    <td><span className="target-text">{cmd.target || '—'}</span></td>
+                    <td>{cmd.ticketId ? <span className="ticket-link">{cmd.ticketId}</span> : <span style={{color:'var(--muted)'}}>—</span>}</td>
+                    <td>{statusBadge(cmd.success)}</td>
+                    <td><span className="dur">{fmtDur(cmd.duration)}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <div className="pagination">
+        <span>{total} total commands</span>
+        <button disabled={offset === 0} onClick={() => load(Math.max(0, offset - limit))}>◀ Prev</button>
+        <span>Page {Math.floor(offset / limit) + 1} / {Math.max(1, Math.ceil(total / limit))}</span>
+        <button disabled={offset + limit >= total} onClick={() => load(offset + limit)}>Next ▶</button>
+      </div>
+
+      {selected && <DetailModal cmd={selected} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+// ─── REPLAY ───────────────────────────────────────────────────────────────────
+
+function ReplayPage({ sessionId }) {
+  const [data, setData] = useState(null);
+  const [step, setStep] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const [error, setError] = useState(null);
+  const intervalRef = useRef(null);
+
+  useEffect(() => {
+    if (!sessionId) return;
+    apiFetch(`/commands/replay/${sessionId}`)
+      .then(setData)
+      .catch(e => setError(e.message));
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (playing && data) {
+      intervalRef.current = setInterval(() => {
+        setStep(s => {
+          if (s >= data.commands.length - 1) { setPlaying(false); return s; }
+          return s + 1;
+        });
+      }, 1200);
+    }
+    return () => clearInterval(intervalRef.current);
+  }, [playing, data]);
+
+  if (!sessionId) return (
+    <div className="container">
+      <div className="page-title">⏪ Replay Mode</div>
+      <div className="page-sub">Navigate to /replay/:sessionId to replay a session</div>
+      <SessionList />
+    </div>
+  );
+
+  if (error) return <div className="container"><div className="error-msg">⚠ {error}</div></div>;
+  if (!data) return <div className="container"><div className="loading">Loading session…</div></div>;
+
+  const cmds = data.commands;
+  if (cmds.length === 0) return <div className="container"><div className="empty"><div className="empty-icon">📭</div><div className="empty-text">No commands in session</div></div></div>;
+
+  const cur = cmds[step];
+
+  return (
+    <div className="container replay-container">
+      <div className="page-title">⏪ Session Replay</div>
+      {data.session && (
+        <div className="page-sub">{data.session.agent} · {data.session.description || sessionId}</div>
+      )}
+
+      <div className="replay-header">
+        <div className="replay-controls">
+          <button className="replay-btn" onClick={() => setStep(0)} disabled={step === 0}>⏮</button>
+          <button className="replay-btn" onClick={() => setStep(s => Math.max(0, s-1))} disabled={step === 0}>⏪</button>
+          <button className={`replay-btn ${playing ? 'active' : ''}`} onClick={() => setPlaying(p => !p)}>
+            {playing ? '⏸' : '▶'}
+          </button>
+          <button className="replay-btn" onClick={() => setStep(s => Math.min(cmds.length-1, s+1))} disabled={step >= cmds.length-1}>⏩</button>
+          <button className="replay-btn" onClick={() => setStep(cmds.length-1)} disabled={step >= cmds.length-1}>⏭</button>
+        </div>
+        <span className="replay-progress">Step {step + 1} / {cmds.length}</span>
+        <button className="btn btn-ghost" onClick={() => window.location.hash = '#/'}>← Feed</button>
+      </div>
+
+      <div className="scrubber-wrap">
+        <input type="range" className="scrubber" min={0} max={cmds.length-1} value={step}
+          onChange={e => { setPlaying(false); setStep(parseInt(e.target.value)); }} />
+        <div style={{display:'flex',justifyContent:'space-between',marginTop:'6px'}}>
+          <span className="ts">{fmtTs(cmds[0].createdAt)}</span>
+          <span className="ts">{fmtTs(cmds[cmds.length-1].createdAt)}</span>
+        </div>
+      </div>
+
+      <div style={{display:'flex',gap:'4px',flexWrap:'wrap',marginBottom:'16px'}}>
+        {cmds.map((c, i) => (
+          <div key={i} className={`tl-dot ${i < step ? 'done' : i === step ? 'current' : 'pending'}`}
+            onClick={() => setStep(i)} title={`Step ${i+1}: ${c.command.slice(0,40)}`} />
+        ))}
+      </div>
+
+      <div className="replay-step">
+        <div className="replay-step-header">
+          <span className="step-num">#{step+1}</span>
+          {agentBadge(cur.agent)}
+          {typeBadge(cur.commandType)}
+          {statusBadge(cur.success)}
+          <span style={{marginLeft:'auto'}} className="ts">{fmtTs(cur.createdAt)}</span>
+          <span className="dur">{fmtDur(cur.duration)}</span>
+        </div>
+        <div className="replay-step-body">
+          {cur.target && (
+            <div style={{marginBottom:'10px', fontSize:'12px', color:'var(--muted)'}}>
+              → <span className="mono">{cur.target}</span>
+            </div>
+          )}
+          <div style={{marginBottom:'10px'}}>
+            <div style={{fontSize:'11px',color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'6px'}}>Command</div>
+            <div className="code-block">$ {cur.command}</div>
+          </div>
+          {cur.result && (
+            <div>
+              <div style={{fontSize:'11px',color:'var(--muted)',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'6px'}}>Output</div>
+              <div className="code-block result">{cur.result}</div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function SessionList() {
+  const [sessions, setSessions] = useState([]);
+  useEffect(() => {
+    apiFetch('/sessions').then(setSessions).catch(() => {});
+  }, []);
+  if (sessions.length === 0) return null;
+  return (
+    <div className="card" style={{marginTop:'24px'}}>
+      <div className="chart-title">Available Sessions</div>
+      <table className="common-table">
+        <thead><tr><th>ID</th><th>Agent</th><th>Description</th><th>Commands</th><th>Started</th><th></th></tr></thead>
+        <tbody>
+          {sessions.map(s => (
+            <tr key={s.id}>
+              <td><span className="mono" style={{fontSize:'11px',color:'var(--muted)'}}>{s.id.slice(0,12)}…</span></td>
+              <td>{agentBadge(s.agent)}</td>
+              <td style={{color:'var(--muted)',fontSize:'13px'}}>{s.description || '—'}</td>
+              <td><span className="mono">{s.commandCount}</span></td>
+              <td><span className="ts">{fmtTs(s.startedAt)}</span></td>
+              <td>
+                <button className="btn btn-ghost" style={{padding:'4px 10px',fontSize:'12px'}}
+                  onClick={() => window.location.hash = `#/replay/${s.id}`}>Replay</button>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+// ─── ANALYTICS ────────────────────────────────────────────────────────────────
+
+function AnalyticsPage() {
+  const [stats, setStats] = useState(null);
+  const [timeline, setTimeline] = useState([]);
+  const [tlMode, setTlMode] = useState('hour');
+  const barRef = useRef(null);
+  const donutRef = useRef(null);
+  const timelineRef = useRef(null);
+  const barChart = useRef(null);
+  const donutChart = useRef(null);
+  const tlChart = useRef(null);
+
+  useEffect(() => {
+    apiFetch('/stats').then(setStats).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    apiFetch(`/stats/timeline?mode=${tlMode}`).then(setTimeline).catch(() => {});
+  }, [tlMode]);
+
+  // Bar chart: commands per agent
+  useEffect(() => {
+    if (!stats || !barRef.current) return;
+    if (barChart.current) barChart.current.destroy();
+    const ctx = barRef.current.getContext('2d');
+    barChart.current = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: stats.byAgent.map(a => a.agent),
+        datasets: [{
+          label: 'Commands',
+          data: stats.byAgent.map(a => a.count),
+          backgroundColor: ['#22c55e','#a855f7','#3b82f6','#ef4444','#f97316'],
+          borderRadius: 4,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
+          y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' }, beginAtZero: true }
+        }
+      }
+    });
+  }, [stats]);
+
+  // Donut: success/fail
+  useEffect(() => {
+    if (!stats || !donutRef.current) return;
+    if (donutChart.current) donutChart.current.destroy();
+    const ctx = donutRef.current.getContext('2d');
+    donutChart.current = new Chart(ctx, {
+      type: 'doughnut',
+      data: {
+        labels: ['Success', 'Failed'],
+        datasets: [{
+          data: [stats.successCount, stats.failCount],
+          backgroundColor: ['#22c55e', '#ef4444'],
+          borderWidth: 0,
+          hoverOffset: 4
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: {
+          legend: { position: 'bottom', labels: { color: '#94a3b8', padding: 16 } }
+        },
+        cutout: '65%'
+      }
+    });
+  }, [stats]);
+
+  // Timeline
+  useEffect(() => {
+    if (!timelineRef.current) return;
+    if (tlChart.current) tlChart.current.destroy();
+    const ctx = timelineRef.current.getContext('2d');
+    tlChart.current = new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: timeline.map(t => t.period),
+        datasets: [{
+          label: 'Commands',
+          data: timeline.map(t => t.count),
+          backgroundColor: 'rgba(34,197,94,0.5)',
+          borderColor: '#22c55e',
+          borderWidth: 1,
+          borderRadius: 2,
+        }]
+      },
+      options: {
+        responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+          x: { ticks: { color: '#64748b', maxRotation: 45 }, grid: { color: '#1e293b' } },
+          y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' }, beginAtZero: true }
+        }
+      }
+    });
+  }, [timeline]);
+
+  if (!stats) return <div className="container"><div className="loading">Loading analytics…</div></div>;
+
+  const typeColors = {ssh:'#06b6d4', api_call:'#3b82f6', deploy:'#a855f7', docker:'#6366f1', git:'#f97316', file_edit:'#eab308', config_change:'#94a3b8'};
+
+  return (
+    <div className="container">
+      <div className="page-title">📊 Analytics</div>
+      <div className="page-sub">Command statistics across all agents</div>
+
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-label">Total Commands</div>
+          <div className="stat-value">{stats.total}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Success Rate</div>
+          <div className="stat-value" style={{color:'var(--green)'}}>{stats.successRate}%</div>
+          <div className="stat-sub">{stats.successCount} success / {stats.failCount} failed</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Avg Duration</div>
+          <div className="stat-value">{fmtDur(stats.avgDuration)}</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-label">Agents Active</div>
+          <div className="stat-value">{stats.byAgent.length}</div>
+        </div>
+      </div>
+
+      <div className="analytics-grid">
+        <div className="card">
+          <div className="chart-title">Commands by Agent</div>
+          <div className="chart-wrap"><canvas ref={barRef} /></div>
+        </div>
+        <div className="card">
+          <div className="chart-title">Success / Fail Rate</div>
+          <div className="chart-wrap"><canvas ref={donutRef} /></div>
+        </div>
+      </div>
+
+      <div className="card" style={{marginBottom:'20px'}}>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'14px'}}>
+          <div className="chart-title" style={{margin:0}}>Command Timeline</div>
+          <div style={{display:'flex',gap:'8px'}}>
+            <button className={`btn ${tlMode==='hour'?'btn-primary':'btn-ghost'}`} style={{padding:'4px 10px',fontSize:'12px'}} onClick={() => setTlMode('hour')}>Last 24h</button>
+            <button className={`btn ${tlMode==='day'?'btn-primary':'btn-ghost'}`} style={{padding:'4px 10px',fontSize:'12px'}} onClick={() => setTlMode('day')}>Last 30d</button>
+          </div>
+        </div>
+        <div className="chart-wrap-tall"><canvas ref={timelineRef} /></div>
+      </div>
+
+      <div className="analytics-grid">
+        <div className="card">
+          <div className="chart-title">Commands by Type</div>
+          <table className="common-table">
+            <thead><tr><th>Type</th><th>Count</th><th>Share</th></tr></thead>
+            <tbody>
+              {stats.byType.map(t => (
+                <tr key={t.commandType}>
+                  <td>{typeBadge(t.commandType)}</td>
+                  <td><span className="mono">{t.count}</span></td>
+                  <td>
+                    <div style={{display:'flex',alignItems:'center',gap:'8px'}}>
+                      <div style={{height:'4px',borderRadius:'2px',width:`${Math.round(t.count/stats.total*100)}%`,
+                        minWidth:'4px',background: typeColors[t.commandType] || '#64748b',maxWidth:'120px'}} />
+                      <span style={{fontSize:'11px',color:'var(--muted)'}}>{Math.round(t.count/stats.total*100)}%</span>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="card">
+          <div className="chart-title">Recent Failures</div>
+          {stats.failedRecent.length === 0 ? (
+            <div style={{color:'var(--green)',fontSize:'13px',textAlign:'center',padding:'24px'}}>✓ No recent failures</div>
+          ) : (
+            <table className="common-table">
+              <thead><tr><th>Agent</th><th>Command</th><th>When</th></tr></thead>
+              <tbody>
+                {stats.failedRecent.map(c => (
+                  <tr key={c.id}>
+                    <td>{agentBadge(c.agent)}</td>
+                    <td><span className="cmd-text" style={{maxWidth:'200px'}}>{c.command.slice(0,40)}</span></td>
+                    <td><span className="ts">{fmtTs(c.createdAt)}</span></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── APP SHELL ────────────────────────────────────────────────────────────────
+
+function App() {
+  const hash = useHash();
+
+  let page = 'feed';
+  let sessionId = null;
+
+  if (hash.startsWith('#/analytics')) page = 'analytics';
+  else if (hash.startsWith('#/replay')) {
+    page = 'replay';
+    sessionId = hash.replace('#/replay/', '').replace('#/replay', '') || null;
+  }
+
+  return (
+    <>
+      <nav>
+        <div className="logo">
+          <span style={{color:'var(--green)'}}>⌨</span>
+          CommandLog
+          <span>/ audit trail</span>
+        </div>
+        <span className="nav-link" onClick={() => window.location.hash='#/'} style={{className: page==='feed'?'active':''}}>
+          <span style={{color: page==='feed' ? 'var(--text)' : undefined, borderBottom: page==='feed' ? '2px solid var(--green)' : '2px solid transparent', paddingBottom:'4px'}}>Feed</span>
+        </span>
+        <span className="nav-link" onClick={() => window.location.hash='#/replay'}>
+          <span style={{color: page==='replay' ? 'var(--text)' : undefined, borderBottom: page==='replay' ? '2px solid var(--green)' : '2px solid transparent', paddingBottom:'4px'}}>Replay</span>
+        </span>
+        <span className="nav-link" onClick={() => window.location.hash='#/analytics'}>
+          <span style={{color: page==='analytics' ? 'var(--text)' : undefined, borderBottom: page==='analytics' ? '2px solid var(--green)' : '2px solid transparent', paddingBottom:'4px'}}>Analytics</span>
+        </span>
+        <div className="nav-spacer" />
+        <div className="nav-pulse"><span className="pulse-dot" />LIVE</div>
+      </nav>
+
+      {page === 'feed' && <CommandFeed />}
+      {page === 'replay' && <ReplayPage sessionId={sessionId} />}
+      {page === 'analytics' && <AnalyticsPage />}
+    </>
+  );
+}
+
+const root = ReactDOM.createRoot(document.getElementById('root'));
+root.render(<App />);
+</script>
+</body>
+</html>

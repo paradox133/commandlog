@@ -1,0 +1,20 @@
+name: commandlog
+
+services:
+  backend:
+    build: ./backend
+    container_name: commandlog-backend
+    ports: ["3085:3085"]
+    volumes:
+      - ./data:/app/data
+    environment:
+      - NODE_ENV=production
+      - PORT=3085
+      - TZ=America/New_York
+    restart: unless-stopped
+  frontend:
+    build: ./frontend
+    container_name: commandlog-frontend
+    ports: ["8270:80"]
+    depends_on: [backend]
+    restart: unless-stopped
